@@ -1,0 +1,394 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Usuarios del sistema
+model User {
+  id               String            @id @default(cuid())
+  email            String            @unique
+  password         String
+  name             String
+  phone            String?
+  role             UserRole
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  // Relaciones
+  condominiumUsers CondominiumUser[]
+  readings         Reading[]
+
+  @@map("users")
+}
+
+// Planes de suscripción con nuevo modelo de pricing
+model Plan {
+  id                String  @id @default(cuid())
+  name              String  @default("Per Unit Plan")
+  pricePerUnitPEN   Float   @default(1.0)  // 1 sol por unidad por mes
+  minimumUnits      Int     @default(6)    // Mínimo 6 unidades
+  isAnnualPrepaid   Boolean @default(true) // Prepago anual
+  features          Json    @default("[]")  // Array de características incluidas
+  isActive          Boolean @default(true)
+  createdAt         DateTime @default(now())
+
+  // Relaciones
+  condominiums Condominium[]
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+// Suscripciones y Facturación
+model Subscription {
+  id            String @id @default(cuid())
+  condominiumId String
+  planId        String
+  
+  // Información de la suscripción
+  unitsCount    Int           // Número de unidades del condominio
+  billingUnits  Int           // Unidades a facturar (máximo entre unitsCount y minimumUnits)
+  
+  // Precios y fechas
+  monthlyAmount Float         // Monto mensual calculado
+  annualAmount  Float         // Monto anual (monthlyAmount * 12)
+  startDate     DateTime      // Inicio de suscripción
+  endDate       DateTime      // Fin de suscripción (1 año después)
+  renewalDate   DateTime      // Fecha de renovación
+  
+  // Estado de pago
+  status        SubscriptionStatus @default(PENDING)
+  paidAt        DateTime?     // Cuándo se realizó el pago
+  approvedAt    DateTime?     // Cuándo se aprobó manualmente
+  approvedBy    String?       // ID del super admin que aprobó
+  
+  // Información de pago
+  paymentMethod String?       // Transferencia, depósito, etc.
+  paymentRef    String?       // Referencia del pago
+  paymentProof  String?       // URL del comprobante
+  notes         String?       // Notas del pago
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  condominium Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  plan        Plan        @relation(fields: [planId], references: [id])
+
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  PENDING       // Pendiente de pago
+  PAID          // Pagado pero no aprobado
+  ACTIVE        // Activa y aprobada
+  EXPIRED       // Expirada
+  CANCELLED     // Cancelada
+  SUSPENDED     // Suspendida por falta de pago
+}
+
+// Relación Many-to-Many entre Users y Condominiums
+model CondominiumUser {
+  id            String @id @default(cuid())
+  userId        String
+  condominiumId String
+  role          UserRole
+  createdAt     DateTime @default(now())
+
+  // Relaciones
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  condominium Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, condominiumId])
+  @@map("condominium_users")
+}
+
+// Condominios
+model Condominium {
+  id                String   @id @default(cuid())
+  name              String
+  address           String
+  city              String?
+  country           String?
+  readingDay        Int?     // Día del mes para recordatorios (1-31)
+  bankAccount       String?  // Para instrucciones de pago
+  bankAccountHolder String?
+  planId            String   // Plan contratado
+  totalUnitsPlanned Int?     // Total de unidades planificadas en el condominio
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relaciones
+  plan             Plan @relation(fields: [planId], references: [id])
+  condominiumUsers CondominiumUser[]
+  blocks           Block[]
+  residents        Resident[]
+  periods          Period[]
+  subscriptions    Subscription[]
+
+  @@map("condominiums")
+}
+
+// Bloques dentro de los condominios
+model Block {
+  id            String   @id @default(cuid())
+  name          String
+  condominiumId String
+  maxUnits      Int
+  createdAt     DateTime @default(now())
+
+  // Relaciones
+  condominium Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  units       Unit[]
+
+  @@map("blocks")
+}
+
+// Residentes
+model Resident {
+  id            String   @id @default(cuid())
+  name          String
+  email         String?
+  phone         String?
+  condominiumId String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  condominium   Condominium     @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  units         Unit[]          // Relación legacy - mantener por compatibilidad
+  unitResidents UnitResident[]  // Nueva relación many-to-many
+
+  @@map("residents")
+}
+
+// Unidades (departamentos)
+model Unit {
+  id         String   @id @default(cuid())
+  name       String
+  blockId    String
+  residentId String?  // Mantener por compatibilidad
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relaciones
+  block         Block           @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  resident      Resident?       @relation(fields: [residentId], references: [id])  // Legacy
+  unitResidents UnitResident[]  // Nueva relación many-to-many
+  meters        Meter[]
+  bills         Bill[]
+  unitCalculations UnitCalculation[]
+
+  @@map("units")
+}
+
+// Tabla intermedia para múltiples residentes por unidad
+model UnitResident {
+  id         String   @id @default(cuid())
+  unitId     String
+  residentId String
+  isPrimary  Boolean  @default(false)  // Para identificar el residente principal
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relaciones
+  unit     Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  resident Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  // Un residente no puede estar duplicado en la misma unidad
+  @@unique([unitId, residentId])
+  @@map("unit_residents")
+}
+
+// Medidores
+model Meter {
+  id           String    @id @default(cuid())
+  unitId       String
+  type         MeterType @default(WATER)
+  serialNumber String?
+  isActive     Boolean   @default(true)
+  installedAt  DateTime  @default(now())
+  replacedAt   DateTime?
+
+  // Relaciones
+  unit     Unit      @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  readings Reading[]
+
+  @@map("meters")
+}
+
+// Períodos de lectura
+model Period {
+  id            String       @id @default(cuid())
+  condominiumId String
+  startDate     DateTime
+  endDate       DateTime?
+  status        PeriodStatus @default(OPEN)
+  totalVolume   Float?
+  totalAmount   Float?
+  receiptPhoto1 String?
+  receiptPhoto2 String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  // Relaciones
+  condominium Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  readings    Reading[]
+  bills       Bill[]
+  periodCalculations PeriodCalculation?
+  unitCalculations   UnitCalculation[]
+
+  @@map("periods")
+}
+
+// Cálculos guardados del período al cerrarse
+model PeriodCalculation {
+  id                         String   @id @default(cuid())
+  periodId                   String   @unique
+  costPerCubicMeter          Float    // Costo por m³ calculado
+  totalIndividualConsumption Float    // Suma total de consumos individuales
+  totalCommonAreasConsumption Float   // Consumo de áreas comunes
+  totalIndividualAmount      Float    // Monto total individual
+  totalCommonAreasAmount     Float    // Monto total de áreas comunes
+  calculatedAt               DateTime @default(now())
+
+  // Relaciones
+  period Period @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  @@map("period_calculations")
+}
+
+// Cálculos guardados por unidad al cerrarse el período
+model UnitCalculation {
+  id                 String  @id @default(cuid())
+  periodId           String
+  unitId             String
+  meterId            String?
+  previousReading    Float   // Lectura anterior guardada
+  currentReading     Float   // Lectura actual guardada
+  consumption        Float   // Consumo calculado
+  individualAmount   Float   // Monto por consumo individual
+  commonAreasAmount  Float   // Monto proporcional de áreas comunes
+  totalAmount        Float   // Monto total a pagar
+  residentName       String? // Nombre del residente al momento del cálculo
+  calculatedAt       DateTime @default(now())
+
+  // Relaciones
+  period Period @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  unit   Unit   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@map("unit_calculations")
+}
+
+// Lecturas de medidores
+model Reading {
+  id            String   @id @default(cuid())
+  meterId       String
+  periodId      String
+  userId        String
+  value         Float
+  photo1        String?
+  photo2        String?
+  ocrValue      Float?
+  ocrConfidence Float?
+  isValidated   Boolean  @default(false)
+  isAnomalous   Boolean  @default(false)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  meter  Meter  @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  period Period @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([meterId, periodId])
+  @@map("readings")
+}
+
+// Facturas
+model Bill {
+  id              String     @id @default(cuid())
+  periodId        String
+  unitId          String
+  currentReading  Float
+  previousReading Float
+  consumption     Float
+  individualCost  Float
+  commonAreaCost  Float
+  totalCost       Float
+  extraCharges    Json?
+  status          BillStatus @default(PENDING)
+  paidAt          DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  // Relaciones
+  period Period @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  unit   Unit   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([periodId, unitId])
+  @@map("bills")
+}
+
+// Configuración del sistema
+model SystemConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_config")
+}
+
+// Log de auditoría
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  oldData   Json?
+  newData   Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
+// Enums
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  ANALYST
+  EDITOR
+}
+
+enum MeterType {
+  WATER
+  ELECTRICITY
+  GAS
+}
+
+enum PeriodStatus {
+  OPEN
+  PENDING_RECEIPT
+  CALCULATING
+  CLOSED
+}
+
+enum BillStatus {
+  PENDING
+  SENT
+  PAID
+  OVERDUE
+}

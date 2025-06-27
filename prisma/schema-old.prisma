@@ -1,0 +1,247 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String            @id @default(cuid())
+  email            String            @unique
+  password         String
+  name             String
+  phone            String?
+  role             UserRole
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  condominiumUsers CondominiumUser[]
+  readings         Reading[]
+
+  @@map("users")
+}
+
+model Plan {
+  id                String  @id @default(cuid())
+  name              String  @default("Per Unit Plan")
+  pricePerUnitPEN   Float   @default(1.0)  // 1 sol por unidad por mes
+  minimumUnits      Int     @default(6)    // Mínimo 6 unidades
+  isAnnualPrepaid   Boolean @default(true) // Prepago anual
+  features          Json    @default("[]")  // Array de características incluidas
+  isActive          Boolean @default(true)
+  createdAt         DateTime @default(now())
+
+  // Relaciones
+  condominiums Condominium[]
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model CondominiumUser {
+  id            String      @id @default(cuid())
+  userId        String
+  condominiumId String
+  role          UserRole
+  createdAt     DateTime    @default(now())
+  condominium   Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, condominiumId])
+  @@map("condominium_users")
+}
+
+model Condominium {
+  id                String            @id @default(cuid())
+  name              String
+  address           String
+  readingDay        Int?
+  bankAccount       String?
+  bankAccountHolder String?
+  planId            String
+  expiresAt         DateTime
+  isActive          Boolean           @default(true)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  blocks            Block[]
+  condominiumUsers  CondominiumUser[]
+  plan              Plan              @relation(fields: [planId], references: [id])
+  periods           Period[]
+  residents         Resident[]
+
+  @@map("condominiums")
+}
+
+model Block {
+  id            String      @id @default(cuid())
+  name          String
+  condominiumId String
+  maxUnits      Int
+  createdAt     DateTime    @default(now())
+  condominium   Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  units         Unit[]
+
+  @@map("blocks")
+}
+
+model Resident {
+  id            String      @id @default(cuid())
+  name          String
+  email         String?
+  phone         String?
+  condominiumId String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  condominium   Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  units         Unit[]
+
+  @@map("residents")
+}
+
+model Unit {
+  id         String    @id @default(cuid())
+  name       String
+  blockId    String
+  residentId String?
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  bills      Bill[]
+  meters     Meter[]
+  block      Block     @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  resident   Resident? @relation(fields: [residentId], references: [id])
+
+  @@map("units")
+}
+
+model Meter {
+  id           String    @id @default(cuid())
+  unitId       String
+  type         MeterType @default(WATER)
+  serialNumber String?
+  isActive     Boolean   @default(true)
+  installedAt  DateTime  @default(now())
+  replacedAt   DateTime?
+  unit         Unit      @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  readings     Reading[]
+
+  @@map("meters")
+}
+
+model Period {
+  id            String       @id @default(cuid())
+  condominiumId String
+  startDate     DateTime
+  endDate       DateTime?
+  status        PeriodStatus @default(OPEN)
+  totalVolume   Float?
+  totalAmount   Float?
+  receiptPhoto1 String?
+  receiptPhoto2 String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  bills         Bill[]
+  condominium   Condominium  @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  readings      Reading[]
+
+  @@map("periods")
+}
+
+model Reading {
+  id            String   @id @default(cuid())
+  meterId       String
+  periodId      String
+  userId        String
+  value         Float
+  photo1        String?
+  photo2        String?
+  ocrValue      Float?
+  ocrConfidence Float?
+  isValidated   Boolean  @default(false)
+  isAnomalous   Boolean  @default(false)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  meter         Meter    @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  period        Period   @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id])
+
+  @@unique([meterId, periodId])
+  @@map("readings")
+}
+
+model Bill {
+  id              String     @id @default(cuid())
+  periodId        String
+  unitId          String
+  currentReading  Float
+  previousReading Float
+  consumption     Float
+  individualCost  Float
+  commonAreaCost  Float
+  totalCost       Float
+  extraCharges    Json?
+  status          BillStatus @default(PENDING)
+  paidAt          DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  period          Period     @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  unit            Unit       @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([periodId, unitId])
+  @@map("bills")
+}
+
+model SystemConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_config")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  oldData   Json?
+  newData   Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  ANALYST
+  EDITOR
+}
+
+enum MeterType {
+  WATER
+  ELECTRICITY
+  GAS
+}
+
+enum PeriodStatus {
+  OPEN
+  PENDING_RECEIPT
+  CALCULATING
+  CLOSED
+}
+
+enum BillStatus {
+  PENDING
+  SENT
+  PAID
+  OVERDUE
+}

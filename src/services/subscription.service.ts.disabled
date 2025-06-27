@@ -1,0 +1,386 @@
+import { PrismaClient, Subscription, SubscriptionStatus } from '@prisma/client';
+import { calculatePricing, calculateSubscriptionDates, getDefaultPricingConfig } from '../utils/pricing';
+
+const prisma = new PrismaClient();
+
+export interface CreateSubscriptionData {
+  condominiumId: string;
+  planId: string;
+  paymentMethod?: string;
+  paymentRef?: string;
+  paymentProof?: string;
+  notes?: string;
+}
+
+export interface UpdateSubscriptionData {
+  paymentMethod?: string;
+  paymentRef?: string;
+  paymentProof?: string;
+  notes?: string;
+  status?: SubscriptionStatus;
+}
+
+export class SubscriptionService {
+  /**
+   * Crea una nueva suscripción basada en el número de unidades del condominio
+   */
+  async createSubscription(data: CreateSubscriptionData): Promise<Subscription> {
+    // Obtener información del condominio y contar unidades activas
+    const condominium = await prisma.condominium.findUnique({
+      where: { id: data.condominiumId },
+      include: {
+        blocks: {
+          include: {
+            units: {
+              where: { isActive: true }
+            }
+          }
+        },
+        plan: true
+      }
+    });
+
+    if (!condominium) {
+      throw new Error('Condominium not found');
+    }
+
+    // Contar unidades activas
+    const unitsCount = condominium.blocks.reduce(
+      (total, block) => total + block.units.length, 
+      0
+    );
+
+    // Calcular pricing
+    const pricingConfig = {
+      pricePerUnitPEN: condominium.plan.pricePerUnitPEN,
+      minimumUnits: condominium.plan.minimumUnits,
+      isAnnualPrepaid: condominium.plan.isAnnualPrepaid
+    };
+
+    const pricing = calculatePricing(unitsCount, pricingConfig);
+    const dates = calculateSubscriptionDates();
+
+    // Crear la suscripción
+    return await prisma.subscription.create({
+      data: {
+        condominiumId: data.condominiumId,
+        planId: data.planId,
+        unitsCount: pricing.unitsCount,
+        billingUnits: pricing.billingUnits,
+        monthlyAmount: pricing.monthlyAmount,
+        annualAmount: pricing.annualAmount,
+        startDate: dates.startDate,
+        endDate: dates.endDate,
+        renewalDate: dates.renewalDate,
+        paymentMethod: data.paymentMethod,
+        paymentRef: data.paymentRef,
+        paymentProof: data.paymentProof,
+        notes: data.notes,
+        status: data.paymentProof ? SubscriptionStatus.PAID : SubscriptionStatus.PENDING
+      },
+      include: {
+        condominium: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            city: true,
+            country: true
+          }
+        },
+        plan: true
+      }
+    });
+  }
+
+  /**
+   * Actualiza una suscripción existente
+   */
+  async updateSubscription(id: string, data: UpdateSubscriptionData): Promise<Subscription> {
+    return await prisma.subscription.update({
+      where: { id },
+      data: {
+        ...data,
+        updatedAt: new Date()
+      },
+      include: {
+        condominium: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            city: true,
+            country: true
+          }
+        },
+        plan: true
+      }
+    });
+  }
+
+  /**
+   * Aprueba una suscripción (solo Super Admin)
+   */
+  async approveSubscription(id: string, approvedBy: string): Promise<Subscription> {
+    return await prisma.subscription.update({
+      where: { id },
+      data: {
+        status: SubscriptionStatus.ACTIVE,
+        approvedAt: new Date(),
+        approvedBy,
+        updatedAt: new Date()
+      },
+      include: {
+        condominium: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            city: true,
+            country: true
+          }
+        },
+        plan: true
+      }
+    });
+  }
+
+  /**
+   * Rechaza o suspende una suscripción
+   */
+  async rejectSubscription(id: string, reason?: string): Promise<Subscription> {
+    return await prisma.subscription.update({
+      where: { id },
+      data: {
+        status: SubscriptionStatus.SUSPENDED,
+        notes: reason,
+        updatedAt: new Date()
+      },
+      include: {
+        condominium: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            city: true,
+            country: true
+          }
+        },
+        plan: true
+      }
+    });
+  }
+
+  /**
+   * Obtiene la suscripción activa de un condominio
+   */
+  async getActiveSubscription(condominiumId: string): Promise<Subscription | null> {
+    return await prisma.subscription.findFirst({
+      where: {
+        condominiumId,
+        status: SubscriptionStatus.ACTIVE,
+        endDate: {
+          gte: new Date()
+        }
+      },
+      include: {
+        condominium: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            city: true,
+            country: true
+          }
+        },
+        plan: true
+      },
+      orderBy: {
+        startDate: 'desc'
+      }
+    });
+  }
+
+  /**
+   * Obtiene todas las suscripciones de un condominio
+   */
+  async getCondominiumSubscriptions(condominiumId: string): Promise<Subscription[]> {
+    return await prisma.subscription.findMany({
+      where: { condominiumId },
+      include: {
+        condominium: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            city: true,
+            country: true
+          }
+        },
+        plan: true
+      },
+      orderBy: {
+        startDate: 'desc'
+      }
+    });
+  }
+
+  /**
+   * Obtiene suscripciones pendientes de aprobación (para Super Admin)
+   */
+  async getPendingSubscriptions(): Promise<Subscription[]> {
+    return await prisma.subscription.findMany({
+      where: {
+        status: {
+          in: [SubscriptionStatus.PENDING, SubscriptionStatus.PAID]
+        }
+      },
+      include: {
+        condominium: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            city: true,
+            country: true
+          }
+        },
+        plan: true
+      },
+      orderBy: {
+        createdAt: 'asc'
+      }
+    });
+  }
+
+  /**
+   * Calcula el pricing para un número específico de unidades
+   */
+  async calculatePricingForUnits(unitsCount: number, planId?: string) {
+    const plan = planId 
+      ? await prisma.plan.findUnique({ where: { id: planId } })
+      : await prisma.plan.findFirst({ where: { isActive: true } });
+
+    if (!plan) {
+      throw new Error('No active plan found');
+    }
+
+    const pricingConfig = {
+      pricePerUnitPEN: plan.pricePerUnitPEN,
+      minimumUnits: plan.minimumUnits,
+      isAnnualPrepaid: plan.isAnnualPrepaid
+    };
+
+    return calculatePricing(unitsCount, pricingConfig);
+  }
+
+  /**
+   * Verifica si un condominio tiene suscripción activa
+   */
+  async hasActiveSubscription(condominiumId: string): Promise<boolean> {
+    const subscription = await this.getActiveSubscription(condominiumId);
+    return subscription !== null;
+  }
+
+  /**
+   * Obtiene estadísticas de suscripciones para el dashboard
+   */
+  async getSubscriptionStats() {
+    const [total, active, pending, expired] = await Promise.all([
+      prisma.subscription.count(),
+      prisma.subscription.count({
+        where: { status: SubscriptionStatus.ACTIVE }
+      }),
+      prisma.subscription.count({
+        where: { status: { in: [SubscriptionStatus.PENDING, SubscriptionStatus.PAID] } }
+      }),
+      prisma.subscription.count({
+        where: { status: SubscriptionStatus.EXPIRED }
+      })
+    ]);
+
+    const revenue = await prisma.subscription.aggregate({
+      where: { status: SubscriptionStatus.ACTIVE },
+      _sum: { annualAmount: true }
+    });
+
+    return {
+      total,
+      active,
+      pending,
+      expired,
+      totalRevenue: revenue._sum.annualAmount || 0
+    };
+  }
+
+  /**
+   * Recalcula pricing si cambia el número de unidades
+   */
+  async recalculateSubscriptionPricing(condominiumId: string): Promise<Subscription | null> {
+    const activeSubscription = await this.getActiveSubscription(condominiumId);
+    
+    if (!activeSubscription) {
+      return null;
+    }
+
+    // Contar unidades actuales
+    const condominium = await prisma.condominium.findUnique({
+      where: { id: condominiumId },
+      include: {
+        blocks: {
+          include: {
+            units: {
+              where: { isActive: true }
+            }
+          }
+        },
+        plan: true
+      }
+    });
+
+    if (!condominium) {
+      throw new Error('Condominium not found');
+    }
+
+    const currentUnitsCount = condominium.blocks.reduce(
+      (total, block) => total + block.units.length, 
+      0
+    );
+
+    // Solo recalcular si el número de unidades cambió
+    if (currentUnitsCount === activeSubscription.unitsCount) {
+      return activeSubscription;
+    }
+
+    const pricingConfig = {
+      pricePerUnitPEN: condominium.plan.pricePerUnitPEN,
+      minimumUnits: condominium.plan.minimumUnits,
+      isAnnualPrepaid: condominium.plan.isAnnualPrepaid
+    };
+
+    const newPricing = calculatePricing(currentUnitsCount, pricingConfig);
+
+    return await prisma.subscription.update({
+      where: { id: activeSubscription.id },
+      data: {
+        unitsCount: newPricing.unitsCount,
+        billingUnits: newPricing.billingUnits,
+        monthlyAmount: newPricing.monthlyAmount,
+        annualAmount: newPricing.annualAmount,
+        updatedAt: new Date()
+      },
+      include: {
+        condominium: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            city: true,
+            country: true
+          }
+        },
+        plan: true
+      }
+    });
+  }
+}

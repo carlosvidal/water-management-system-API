@@ -1,0 +1,457 @@
+import { Router } from 'express';
+import { SubscriptionService } from '../services/subscription.service';
+import { authenticate, requireRole } from '../middleware/auth';
+import { UserRole, SubscriptionStatus } from '@prisma/client';
+import { formatPricePEN, getPricingExamples } from '../utils/pricing';
+import { asyncHandler } from '../middleware/errorHandler';
+
+const router = Router();
+const subscriptionService = new SubscriptionService();
+
+/**
+ * @swagger
+ * /api/subscriptions/pricing/calculate:
+ *   post:
+ *     summary: Calculate pricing for a number of units
+ *     description: Calculate monthly and annual pricing based on unit count
+ *     tags:
+ *       - Subscriptions
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - unitsCount
+ *             properties:
+ *               unitsCount:
+ *                 type: integer
+ *                 minimum: 1
+ *                 description: Number of units in the condominium
+ *                 example: 8
+ *               planId:
+ *                 type: string
+ *                 description: Optional plan ID (uses default if not provided)
+ *     responses:
+ *       200:
+ *         description: Pricing calculation successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 pricing:
+ *                   type: object
+ *                   properties:
+ *                     unitsCount:
+ *                       type: integer
+ *                       example: 8
+ *                     billingUnits:
+ *                       type: integer
+ *                       example: 8
+ *                     monthlyAmount:
+ *                       type: number
+ *                       example: 8.0
+ *                     annualAmount:
+ *                       type: number
+ *                       example: 96.0
+ *                 formatted:
+ *                   type: object
+ *                   properties:
+ *                     monthly:
+ *                       type: string
+ *                       example: "S/ 8.00"
+ *                     annual:
+ *                       type: string
+ *                       example: "S/ 96.00"
+ */
+router.post('/pricing/calculate', authenticate, asyncHandler(async (req, res) => {
+  try {
+    const { unitsCount, planId } = req.body;
+
+    if (!unitsCount || unitsCount < 1) {
+      return res.status(400).json({
+        message: 'Units count is required and must be greater than 0'
+      });
+    }
+
+    const pricing = await subscriptionService.calculatePricingForUnits(unitsCount, planId);
+    
+    res.json({
+      pricing,
+      formatted: {
+        monthly: formatPricePEN(pricing.monthlyAmount),
+        annual: formatPricePEN(pricing.annualAmount)
+      }
+    });
+  } catch (error) {
+    console.error('Error calculating pricing:', error);
+    res.status(500).json({
+      message: 'Error calculating pricing'
+    });
+  }
+}));
+
+/**
+ * @swagger
+ * /api/subscriptions/pricing/examples:
+ *   get:
+ *     summary: Get pricing examples
+ *     description: Get examples of pricing for different unit counts
+ *     tags:
+ *       - Subscriptions
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Pricing examples retrieved successfully
+ */
+router.get('/pricing/examples', authenticate, async (req, res) => {
+  try {
+    const examples = getPricingExamples();
+    res.json({ examples });
+  } catch (error) {
+    console.error('Error getting pricing examples:', error);
+    res.status(500).json({
+      message: 'Error getting pricing examples'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/subscriptions:
+ *   post:
+ *     summary: Create a new subscription
+ *     description: Create a subscription for a condominium
+ *     tags:
+ *       - Subscriptions
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - condominiumId
+ *               - planId
+ *             properties:
+ *               condominiumId:
+ *                 type: string
+ *                 format: uuid
+ *               planId:
+ *                 type: string
+ *                 format: uuid
+ *               paymentMethod:
+ *                 type: string
+ *                 example: "Transferencia bancaria"
+ *               paymentRef:
+ *                 type: string
+ *                 example: "TXN-123456789"
+ *               paymentProof:
+ *                 type: string
+ *                 example: "https://example.com/proof.jpg"
+ *               notes:
+ *                 type: string
+ *                 example: "Pago anual completo"
+ */
+router.post('/', authenticate, requireRole([UserRole.SUPER_ADMIN, UserRole.ADMIN]), async (req, res) => {
+  try {
+    const subscription = await subscriptionService.createSubscription(req.body);
+    
+    res.status(201).json({
+      message: 'Subscription created successfully',
+      subscription
+    });
+  } catch (error) {
+    console.error('Error creating subscription:', error);
+    res.status(500).json({
+      message: 'Error creating subscription'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/subscriptions/{id}:
+ *   put:
+ *     summary: Update a subscription
+ *     description: Update subscription payment information
+ *     tags:
+ *       - Subscriptions
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ */
+router.put('/:id', authenticate, requireRole([UserRole.SUPER_ADMIN, UserRole.ADMIN]), async (req, res) => {
+  try {
+    const subscription = await subscriptionService.updateSubscription(req.params.id, req.body);
+    
+    res.json({
+      message: 'Subscription updated successfully',
+      subscription
+    });
+  } catch (error) {
+    console.error('Error updating subscription:', error);
+    res.status(500).json({
+      message: 'Error updating subscription'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/subscriptions/{id}/approve:
+ *   post:
+ *     summary: Approve a subscription (Super Admin only)
+ *     description: Manually approve a subscription payment
+ *     tags:
+ *       - Subscriptions
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ */
+router.post('/:id/approve', authenticate, requireRole([UserRole.SUPER_ADMIN]), async (req, res) => {
+  try {
+    const subscription = await subscriptionService.approveSubscription(req.params.id, req.user.id);
+    
+    res.json({
+      message: 'Subscription approved successfully',
+      subscription
+    });
+  } catch (error) {
+    console.error('Error approving subscription:', error);
+    res.status(500).json({
+      message: 'Error approving subscription'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/subscriptions/{id}/reject:
+ *   post:
+ *     summary: Reject or suspend a subscription
+ *     description: Reject or suspend a subscription with optional reason
+ *     tags:
+ *       - Subscriptions
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 example: "Comprobante de pago inválido"
+ */
+router.post('/:id/reject', authenticate, requireRole([UserRole.SUPER_ADMIN]), async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const subscription = await subscriptionService.rejectSubscription(req.params.id, reason);
+    
+    res.json({
+      message: 'Subscription rejected successfully',
+      subscription
+    });
+  } catch (error) {
+    console.error('Error rejecting subscription:', error);
+    res.status(500).json({
+      message: 'Error rejecting subscription'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/subscriptions/condominium/{condominiumId}:
+ *   get:
+ *     summary: Get condominium subscriptions
+ *     description: Get all subscriptions for a specific condominium
+ *     tags:
+ *       - Subscriptions
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: condominiumId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ */
+router.get('/condominium/:condominiumId', authenticate, async (req, res) => {
+  try {
+    const subscriptions = await subscriptionService.getCondominiumSubscriptions(req.params.condominiumId);
+    
+    res.json({
+      subscriptions,
+      count: subscriptions.length
+    });
+  } catch (error) {
+    console.error('Error getting condominium subscriptions:', error);
+    res.status(500).json({
+      message: 'Error getting condominium subscriptions'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/subscriptions/condominium/{condominiumId}/active:
+ *   get:
+ *     summary: Get active subscription for condominium
+ *     description: Get the current active subscription for a condominium
+ *     tags:
+ *       - Subscriptions
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: condominiumId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ */
+router.get('/condominium/:condominiumId/active', authenticate, async (req, res) => {
+  try {
+    const subscription = await subscriptionService.getActiveSubscription(req.params.condominiumId);
+    
+    if (!subscription) {
+      return res.status(404).json({
+        message: 'No active subscription found for this condominium'
+      });
+    }
+
+    res.json({ subscription });
+  } catch (error) {
+    console.error('Error getting active subscription:', error);
+    res.status(500).json({
+      message: 'Error getting active subscription'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/subscriptions/pending:
+ *   get:
+ *     summary: Get pending subscriptions (Super Admin only)
+ *     description: Get all subscriptions pending approval
+ *     tags:
+ *       - Subscriptions
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get('/pending', authenticate, requireRole([UserRole.SUPER_ADMIN]), async (req, res) => {
+  try {
+    const subscriptions = await subscriptionService.getPendingSubscriptions();
+    
+    res.json({
+      subscriptions,
+      count: subscriptions.length
+    });
+  } catch (error) {
+    console.error('Error getting pending subscriptions:', error);
+    res.status(500).json({
+      message: 'Error getting pending subscriptions'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/subscriptions/stats:
+ *   get:
+ *     summary: Get subscription statistics (Super Admin only)
+ *     description: Get dashboard statistics for subscriptions
+ *     tags:
+ *       - Subscriptions
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get('/stats', authenticate, requireRole([UserRole.SUPER_ADMIN]), async (req, res) => {
+  try {
+    const stats = await subscriptionService.getSubscriptionStats();
+    
+    res.json({
+      stats,
+      formattedRevenue: formatPricePEN(stats.totalRevenue)
+    });
+  } catch (error) {
+    console.error('Error getting subscription stats:', error);
+    res.status(500).json({
+      message: 'Error getting subscription stats'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/subscriptions/condominium/{condominiumId}/recalculate:
+ *   post:
+ *     summary: Recalculate subscription pricing
+ *     description: Recalculate pricing if number of units changed
+ *     tags:
+ *       - Subscriptions
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: condominiumId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ */
+router.post('/condominium/:condominiumId/recalculate', authenticate, requireRole([UserRole.SUPER_ADMIN, UserRole.ADMIN]), async (req, res) => {
+  try {
+    const subscription = await subscriptionService.recalculateSubscriptionPricing(req.params.condominiumId);
+    
+    if (!subscription) {
+      return res.status(404).json({
+        message: 'No active subscription found for recalculation'
+      });
+    }
+
+    res.json({
+      message: 'Subscription pricing recalculated successfully',
+      subscription
+    });
+  } catch (error) {
+    console.error('Error recalculating subscription:', error);
+    res.status(500).json({
+      message: 'Error recalculating subscription'
+    });
+  }
+});
+
+export default router;
