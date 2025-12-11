@@ -68,15 +68,15 @@ const updateReadingSchema = z.object({
 router.post('/', asyncHandler(async (req, res) => {
   const data = createPeriodSchema.parse(req.body);
   
-  // Verify user has access to this condominium
+  // Verify user has access to this condominium and has ADMIN role
   if (req.user!.role !== UserRole.SUPER_ADMIN) {
     const hasAccess = req.condominiumAccess?.some(
-      access => access.condominiumId === data.condominiumId && 
-      [UserRole.ADMIN, UserRole.ANALYST].includes(access.role)
+      access => access.condominiumId === data.condominiumId &&
+      access.role === UserRole.ADMIN
     );
-    
+
     if (!hasAccess) {
-      throw createError('Access denied to this condominium', 403);
+      throw createError('Access denied. Only administrators can create periods.', 403);
     }
   }
 
@@ -261,15 +261,15 @@ router.put('/:id', asyncHandler(async (req, res) => {
     throw createError('Period not found', 404);
   }
 
-  // Check access to condominium
+  // Check access to condominium - only ADMIN can update periods
   if (req.user!.role !== UserRole.SUPER_ADMIN) {
     const hasAccess = req.condominiumAccess?.some(
-      access => access.condominiumId === period.condominiumId && 
-      [UserRole.ADMIN, UserRole.ANALYST].includes(access.role)
+      access => access.condominiumId === period.condominiumId &&
+      access.role === UserRole.ADMIN
     );
-    
+
     if (!hasAccess) {
-      throw createError('Access denied to this period', 403);
+      throw createError('Access denied. Only administrators can update periods.', 403);
     }
   }
 
@@ -415,15 +415,15 @@ router.put('/:id/reset', asyncHandler(async (req, res) => {
     throw createError('Period not found', 404);
   }
 
-  // Check access to condominium
+  // Check access to condominium - only ADMIN can reset periods
   if (req.user!.role !== UserRole.SUPER_ADMIN) {
     const hasAccess = req.condominiumAccess?.some(
-      access => access.condominiumId === period.condominiumId && 
-      [UserRole.ADMIN, UserRole.ANALYST].includes(access.role)
+      access => access.condominiumId === period.condominiumId &&
+      access.role === UserRole.ADMIN
     );
-    
+
     if (!hasAccess) {
-      throw createError('Access denied to reset this period', 403);
+      throw createError('Access denied. Only administrators can reset periods.', 403);
     }
   }
 
@@ -460,15 +460,15 @@ router.put('/:id/close', asyncHandler(async (req, res) => {
     throw createError('Period not found', 404);
   }
 
-  // Check access to condominium
+  // Check access to condominium - only ADMIN can close periods
   if (req.user!.role !== UserRole.SUPER_ADMIN) {
     const hasAccess = req.condominiumAccess?.some(
-      access => access.condominiumId === period.condominiumId && 
-      [UserRole.ADMIN, UserRole.ANALYST].includes(access.role)
+      access => access.condominiumId === period.condominiumId &&
+      access.role === UserRole.ADMIN
     );
-    
+
     if (!hasAccess) {
-      throw createError('Access denied to close this period', 403);
+      throw createError('Access denied. Only administrators can close periods.', 403);
     }
   }
 
@@ -535,15 +535,15 @@ router.put('/:id/receipt', asyncHandler(async (req, res) => {
     throw createError('Period not found', 404);
   }
 
-  // Check access to condominium
+  // Check access to condominium - only ADMIN can update receipt info
   if (req.user!.role !== UserRole.SUPER_ADMIN) {
     const hasAccess = req.condominiumAccess?.some(
-      access => access.condominiumId === period.condominiumId && 
-      [UserRole.ADMIN, UserRole.ANALYST].includes(access.role)
+      access => access.condominiumId === period.condominiumId &&
+      access.role === UserRole.ADMIN
     );
-    
+
     if (!hasAccess) {
-      throw createError('Access denied to this period', 403);
+      throw createError('Access denied. Only administrators can update receipt info.', 403);
     }
   }
 
@@ -585,14 +585,15 @@ router.post('/:periodId/readings', asyncHandler(async (req, res) => {
     throw createError('Period not found', 404);
   }
 
-  // Check access to condominium
+  // Check access to condominium and role - only ADMIN and EDITOR can create readings
   if (req.user!.role !== UserRole.SUPER_ADMIN) {
     const hasAccess = req.condominiumAccess?.some(
-      access => access.condominiumId === period.condominiumId
+      access => access.condominiumId === period.condominiumId &&
+      [UserRole.ADMIN, UserRole.EDITOR].includes(access.role)
     );
-    
+
     if (!hasAccess) {
-      throw createError('Access denied to this period', 403);
+      throw createError('Access denied. Only administrators and editors can create readings.', 403);
     }
   }
 
@@ -905,15 +906,15 @@ router.put('/:periodId/readings/validate-all', asyncHandler(async (req, res) => 
     throw createError('Period not found', 404);
   }
 
-  // Check access to condominium
+  // Check access to condominium - only ADMIN can validate readings
   if (req.user!.role !== UserRole.SUPER_ADMIN) {
     const hasAccess = req.condominiumAccess?.some(
-      access => access.condominiumId === period.condominiumId && 
-      [UserRole.ADMIN, UserRole.ANALYST].includes(access.role)
+      access => access.condominiumId === period.condominiumId &&
+      access.role === UserRole.ADMIN
     );
-    
+
     if (!hasAccess) {
-      throw createError('Access denied to validate readings in this period', 403);
+      throw createError('Access denied. Only administrators can validate readings.', 403);
     }
   }
 
@@ -936,7 +937,7 @@ router.put('/:periodId/readings/validate-all', asyncHandler(async (req, res) => 
 }));
 
 // Update reading validation
-router.put('/:periodId/readings/:readingId/validate', 
+router.put('/:periodId/readings/:readingId/validate',
   asyncHandler(async (req, res) => {
     const data = validateReadingSchema.parse(req.body);
 
@@ -959,15 +960,15 @@ router.put('/:periodId/readings/:readingId/validate',
       throw createError('Reading does not belong to this period', 400);
     }
 
-    // Check access to condominium
+    // Check access to condominium - only ADMIN can validate readings
     if (req.user!.role !== UserRole.SUPER_ADMIN) {
       const hasAccess = req.condominiumAccess?.some(
-        access => access.condominiumId === reading.period.condominiumId && 
-        [UserRole.ADMIN, UserRole.ANALYST].includes(access.role)
+        access => access.condominiumId === reading.period.condominiumId &&
+        access.role === UserRole.ADMIN
       );
-      
+
       if (!hasAccess) {
-        throw createError('Access denied to validate this reading', 403);
+        throw createError('Access denied. Only administrators can validate readings.', 403);
       }
     }
 

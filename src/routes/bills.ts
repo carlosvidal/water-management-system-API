@@ -39,15 +39,15 @@ router.post('/calculate', asyncHandler(async (req, res) => {
     throw createError('Period not found', 404);
   }
 
-  // Check access to condominium
+  // Check access to condominium - only ADMIN can calculate bills
   if (req.user!.role !== UserRole.SUPER_ADMIN) {
     const hasAccess = req.condominiumAccess?.some(
-      access => access.condominiumId === period.condominiumId && 
-      [UserRole.ADMIN, UserRole.ANALYST].includes(access.role)
+      access => access.condominiumId === period.condominiumId &&
+      access.role === UserRole.ADMIN
     );
-    
+
     if (!hasAccess) {
-      throw createError('Access denied to calculate bills for this period', 403);
+      throw createError('Access denied. Only administrators can calculate bills.', 403);
     }
   }
 
@@ -421,15 +421,15 @@ router.put('/:billId/status', asyncHandler(async (req, res) => {
     throw createError('Bill not found', 404);
   }
 
-  // Check access to condominium
+  // Check access to condominium - only ADMIN can update bill status
   if (req.user!.role !== UserRole.SUPER_ADMIN) {
     const hasAccess = req.condominiumAccess?.some(
-      access => access.condominiumId === bill.unit.block.condominiumId && 
-      [UserRole.ADMIN, UserRole.ANALYST].includes(access.role)
+      access => access.condominiumId === bill.unit.block.condominiumId &&
+      access.role === UserRole.ADMIN
     );
-    
+
     if (!hasAccess) {
-      throw createError('Access denied to update this bill', 403);
+      throw createError('Access denied. Only administrators can update bill status.', 403);
     }
   }
 

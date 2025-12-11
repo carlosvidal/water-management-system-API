@@ -676,7 +676,7 @@ router.get('/:id/blocks', requireCondominiumAccess(), asyncHandler(async (req, r
 // ============== UNITS MANAGEMENT ==============
 
 // Create unit (with automatic meter creation)
-router.post('/:condominiumId/units', requireCondominiumAccess([UserRole.ADMIN]), asyncHandler(async (req, res) => {
+router.post('/:condominiumId/units', requireCondominiumAccess([UserRole.ADMIN, UserRole.EDITOR]), asyncHandler(async (req, res) => {
   const data = createUnitSchema.parse(req.body);
 
   // Verify block belongs to this condominium
@@ -866,7 +866,7 @@ router.put('/:condominiumId/units/:unitId/resident',
 // ============== RESIDENTS MANAGEMENT ==============
 
 // Create resident
-router.post('/:id/residents', requireCondominiumAccess([UserRole.ADMIN]), asyncHandler(async (req, res) => {
+router.post('/:id/residents', requireCondominiumAccess([UserRole.ADMIN, UserRole.EDITOR]), asyncHandler(async (req, res) => {
   const data = createResidentSchema.parse(req.body);
 
   const resident = await prisma.resident.create({
@@ -932,8 +932,8 @@ router.get('/:id/residents', requireCondominiumAccess(), asyncHandler(async (req
 }));
 
 // Update resident
-router.put('/:condominiumId/residents/:residentId', 
-  requireCondominiumAccess([UserRole.ADMIN]), 
+router.put('/:condominiumId/residents/:residentId',
+  requireCondominiumAccess([UserRole.ADMIN, UserRole.EDITOR]),
   asyncHandler(async (req, res) => {
     const data = updateResidentSchema.parse(req.body);
 
