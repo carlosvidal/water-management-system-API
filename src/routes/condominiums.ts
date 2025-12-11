@@ -96,9 +96,25 @@ router.get('/', asyncHandler(async (req, res) => {
             isAnnualPrepaid: true,
           },
         },
+        blocks: {
+          include: {
+            units: {
+              select: {
+                id: true,
+                name: true,
+                residentId: true,
+              },
+            },
+            _count: {
+              select: { units: true },
+            },
+          },
+          orderBy: { name: 'asc' },
+        },
         _count: {
           select: {
-            blocks: true,
+            residents: true,
+            periods: true,
           },
         },
       },
@@ -124,9 +140,25 @@ router.get('/', asyncHandler(async (req, res) => {
             isAnnualPrepaid: true,
           },
         },
+        blocks: {
+          include: {
+            units: {
+              select: {
+                id: true,
+                name: true,
+                residentId: true,
+              },
+            },
+            _count: {
+              select: { units: true },
+            },
+          },
+          orderBy: { name: 'asc' },
+        },
         _count: {
           select: {
-            blocks: true,
+            residents: true,
+            periods: true,
           },
         },
       },
