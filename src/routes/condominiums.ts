@@ -83,87 +83,76 @@ router.get('/', asyncHandler(async (req, res) => {
   
   let condominiums;
   
-  if (user.role === 'SUPER_ADMIN') {
-    // Super admin can see all condominiums
-    condominiums = await prisma.condominium.findMany({
-      include: {
-        plan: {
-          select: {
-            id: true,
-            name: true,
-            pricePerUnitPEN: true,
-            minimumUnits: true,
-            isAnnualPrepaid: true,
-          },
-        },
-        blocks: {
-          include: {
-            units: {
-              select: {
-                id: true,
-                name: true,
-                residentId: true,
+  try {
+    if (user.role === 'SUPER_ADMIN') {
+      // Super admin can see all condominiums
+      condominiums = await prisma.condominium.findMany({
+        include: {
+          plan: true,
+          blocks: {
+            include: {
+              units: {
+                select: {
+                  id: true,
+                  name: true,
+                  residentId: true,
+                },
+              },
+              _count: {
+                select: { units: true },
               },
             },
-            _count: {
-              select: { units: true },
+            orderBy: { name: 'asc' },
+          },
+          _count: {
+            select: {
+              residents: true,
+              periods: true,
             },
           },
-          orderBy: { name: 'asc' },
         },
-        _count: {
-          select: {
-            residents: true,
-            periods: true,
+        orderBy: { createdAt: 'desc' },
+      });
+    } else {
+      // Other users can only see condominiums they have access to
+      condominiums = await prisma.condominium.findMany({
+        where: {
+          condominiumUsers: {
+            some: {
+              userId: user.id,
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-  } else {
-    // Other users can only see condominiums they have access to
-    condominiums = await prisma.condominium.findMany({
-      where: {
-        condominiumUsers: {
-          some: {
-            userId: user.id,
-          },
-        },
-      },
-      include: {
-        plan: {
-          select: {
-            id: true,
-            name: true,
-            pricePerUnitPEN: true,
-            minimumUnits: true,
-            isAnnualPrepaid: true,
-          },
-        },
-        blocks: {
-          include: {
-            units: {
-              select: {
-                id: true,
-                name: true,
-                residentId: true,
+        include: {
+          plan: true,
+          blocks: {
+            include: {
+              units: {
+                select: {
+                  id: true,
+                  name: true,
+                  residentId: true,
+                },
+              },
+              _count: {
+                select: { units: true },
               },
             },
-            _count: {
-              select: { units: true },
+            orderBy: { name: 'asc' },
+          },
+          _count: {
+            select: {
+              residents: true,
+              periods: true,
             },
           },
-          orderBy: { name: 'asc' },
         },
-        _count: {
-          select: {
-            residents: true,
-            periods: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+  } catch (error) {
+    console.error('Error fetching condominiums:', error);
+    throw createError('Error fetching condominiums', 500);
   }
 
   res.json({ condominiums });
