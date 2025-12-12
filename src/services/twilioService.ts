@@ -17,6 +17,16 @@ export const twilioService = {
    * @param body - Message body
    */
   async sendSMS(to: string, body: string): Promise<void> {
+    // Development mode: Just log the message instead of sending
+    if (process.env.NODE_ENV === 'development') {
+      console.log('====================================');
+      console.log('📱 SMS (Development Mode - Not Sent)');
+      console.log(`To: ${to}`);
+      console.log(`Message: ${body}`);
+      console.log('====================================');
+      return;
+    }
+
     if (!client || !twilioPhoneNumber) {
       console.error('Twilio not configured. Cannot send SMS.');
       throw new Error('SMS service not configured');
