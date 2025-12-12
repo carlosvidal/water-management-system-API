@@ -10,12 +10,23 @@ datasource db {
 // Usuarios del sistema
 model User {
   id               String            @id @default(cuid())
-  email            String            @unique
-  password         String
+  email            String?           @unique  // Optional for mobile-only users
+  password         String?                    // Optional for OTP-only users
   name             String
-  phone            String?
+  phone            String?           @unique  // Unique for OTP authentication
   role             UserRole
   isActive         Boolean           @default(true)
+
+  // OTP fields for SMS authentication
+  otpCode          String?                    // Current OTP code
+  otpExpiry        DateTime?                  // OTP expiration time
+  otpAttempts      Int               @default(0) // Failed OTP attempts
+  phoneVerified    Boolean           @default(false) // Phone verification status
+
+  // Magic link fields
+  magicLinkToken   String?           @unique  // Token for magic link
+  magicLinkExpiry  DateTime?                  // Magic link expiration
+
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 

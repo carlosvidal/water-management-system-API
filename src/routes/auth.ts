@@ -11,6 +11,8 @@ import {
   RefreshTokenRequest,
   RefreshTokenResponse,
 } from '../types/auth';
+import { otpService } from '../services/otpService';
+import { twilioService } from '../services/twilioService';
 
 const router = express.Router();
 
@@ -22,6 +24,19 @@ const loginSchema = z.object({
 
 const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token is required'),
+});
+
+const phoneLoginSchema = z.object({
+  phone: z.string().min(1, 'Phone number is required'),
+});
+
+const verifyOTPSchema = z.object({
+  phone: z.string().min(1, 'Phone number is required'),
+  code: z.string().length(6, 'OTP code must be 6 digits'),
+});
+
+const resendOTPSchema = z.object({
+  phone: z.string().min(1, 'Phone number is required'),
 });
 
 /**
@@ -408,6 +423,262 @@ router.get('/me', authenticate, asyncHandler(async (req: Request, res: Response)
   }
 
   res.json(user);
+}));
+
+/**
+ * @swagger
+ * /auth/otp/send:
+ *   post:
+ *     summary: Send OTP to phone number
+ *     description: Send a 6-digit OTP code via SMS for phone authentication (for ADMIN and EDITOR roles)
+ *     tags: [Authentication]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phone
+ *             properties:
+ *               phone:
+ *                 type: string
+ *                 description: Phone number in E.164 format
+ *                 example: +51999999999
+ *     responses:
+ *       200:
+ *         description: OTP sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: OTP sent successfully
+ *                 expiresIn:
+ *                   type: number
+ *                   description: OTP expiration time in minutes
+ *                   example: 10
+ *       400:
+ *         description: Invalid phone number or user not found
+ *       429:
+ *         description: Too many OTP requests
+ */
+router.post('/otp/send', authRateLimit, asyncHandler(async (req: Request, res: Response) => {
+  const validatedData = phoneLoginSchema.parse(req.body);
+  const { phone } = validatedData;
+
+  // Format phone number
+  const formattedPhone = twilioService.formatPhoneNumber(phone);
+
+  // Validate phone format
+  if (!twilioService.isValidPhoneNumber(formattedPhone)) {
+    throw createError('Invalid phone number format', 400);
+  }
+
+  // Find user by phone
+  const user = await prisma.user.findUnique({
+    where: { phone: formattedPhone },
+    select: {
+      id: true,
+      phone: true,
+      name: true,
+      role: true,
+      isActive: true,
+    },
+  });
+
+  if (!user || !user.isActive) {
+    throw createError('User not found or inactive', 400);
+  }
+
+  // Check if user role allows mobile app access (ADMIN or EDITOR only)
+  if (user.role !== 'ADMIN' && user.role !== 'EDITOR') {
+    throw createError('Mobile app access is only available for Administrators and Editors', 403);
+  }
+
+  // Send OTP
+  await otpService.sendOTP(user.id, formattedPhone);
+
+  res.json({
+    message: 'OTP sent successfully',
+    expiresIn: parseInt(process.env.OTP_EXPIRES_IN_MINUTES || '10'),
+  });
+}));
+
+/**
+ * @swagger
+ * /auth/otp/verify:
+ *   post:
+ *     summary: Verify OTP code
+ *     description: Verify the OTP code sent to phone and authenticate the user
+ *     tags: [Authentication]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phone
+ *               - code
+ *             properties:
+ *               phone:
+ *                 type: string
+ *                 description: Phone number in E.164 format
+ *                 example: +51999999999
+ *               code:
+ *                 type: string
+ *                 description: 6-digit OTP code
+ *                 example: 123456
+ *     responses:
+ *       200:
+ *         description: OTP verified successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *                 accessToken:
+ *                   type: string
+ *                 refreshToken:
+ *                   type: string
+ *                 expiresIn:
+ *                   type: string
+ *       400:
+ *         description: Invalid OTP code
+ *       401:
+ *         description: OTP expired or too many attempts
+ */
+router.post('/otp/verify', authRateLimit, asyncHandler(async (req: Request, res: Response) => {
+  const validatedData = verifyOTPSchema.parse(req.body);
+  const { phone, code } = validatedData;
+
+  // Format phone number
+  const formattedPhone = twilioService.formatPhoneNumber(phone);
+
+  // Find user by phone
+  const user = await prisma.user.findUnique({
+    where: { phone: formattedPhone },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      phone: true,
+      role: true,
+      isActive: true,
+    },
+  });
+
+  if (!user || !user.isActive) {
+    throw createError('User not found or inactive', 400);
+  }
+
+  // Verify OTP
+  const isValid = await otpService.verifyOTP(user.id, code);
+
+  if (!isValid) {
+    throw createError('Invalid OTP code', 400);
+  }
+
+  // Generate tokens
+  const tokenPayload = {
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+  };
+
+  const accessToken = generateAccessToken(tokenPayload);
+  const refreshToken = generateRefreshToken(tokenPayload);
+
+  // Log successful login
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      action: 'LOGIN_OTP',
+      entity: 'User',
+      entityId: user.id,
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
+    },
+  });
+
+  const response: LoginResponse = {
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      isActive: user.isActive,
+    },
+    accessToken,
+    refreshToken,
+    expiresIn: process.env.JWT_EXPIRES_IN || '1h',
+  };
+
+  res.json(response);
+}));
+
+/**
+ * @swagger
+ * /auth/otp/resend:
+ *   post:
+ *     summary: Resend OTP code
+ *     description: Request a new OTP code to be sent via SMS
+ *     tags: [Authentication]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phone
+ *             properties:
+ *               phone:
+ *                 type: string
+ *                 description: Phone number in E.164 format
+ *                 example: +51999999999
+ *     responses:
+ *       200:
+ *         description: OTP resent successfully
+ *       400:
+ *         description: Invalid phone number or too soon to resend
+ *       429:
+ *         description: Too many OTP requests
+ */
+router.post('/otp/resend', authRateLimit, asyncHandler(async (req: Request, res: Response) => {
+  const validatedData = resendOTPSchema.parse(req.body);
+  const { phone } = validatedData;
+
+  // Format phone number
+  const formattedPhone = twilioService.formatPhoneNumber(phone);
+
+  // Find user by phone
+  const user = await prisma.user.findUnique({
+    where: { phone: formattedPhone },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!user) {
+    throw createError('User not found', 400);
+  }
+
+  // Resend OTP
+  await otpService.resendOTP(user.id);
+
+  res.json({
+    message: 'OTP resent successfully',
+    expiresIn: parseInt(process.env.OTP_EXPIRES_IN_MINUTES || '10'),
+  });
 }));
 
 export default router;
