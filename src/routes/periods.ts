@@ -1157,12 +1157,15 @@ router.post('/:periodId/calculations', asyncHandler(async (req, res) => {
       },
     });
 
-    // Save unit-level calculations
+    // Save unit-level calculations (exclude display-only fields)
     const savedUnitCalcs = await tx.unitCalculation.createMany({
-      data: unitCalculations.map((calc: any) => ({
-        periodId: req.params.periodId,
-        ...calc,
-      })),
+      data: unitCalculations.map((calc: any) => {
+        const { unitName, blockName, ...validCalc } = calc;
+        return {
+          periodId: req.params.periodId,
+          ...validCalc,
+        };
+      }),
     });
 
     return { periodCalculation: savedPeriodCalc, unitCalculationsCount: savedUnitCalcs.count };
