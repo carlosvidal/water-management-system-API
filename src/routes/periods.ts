@@ -506,19 +506,25 @@ router.put('/:id/close', asyncHandler(async (req, res) => {
     },
   });
 
-  // Log action
-  await prisma.auditLog.create({
-    data: {
-      userId: req.user!.id,
-      action: 'UPDATE',
-      entity: 'Period',
-      entityId: period.id,
-      oldData: period,
-      newData: updatedPeriod,
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent'),
-    },
-  });
+  // Log action (exclude readings array to avoid serialization issues)
+  try {
+    const { readings: _oldReadings, ...oldData } = period;
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user!.id,
+        action: 'UPDATE',
+        entity: 'Period',
+        entityId: period.id,
+        oldData,
+        newData: updatedPeriod,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+      },
+    });
+  } catch (logError) {
+    console.error('Failed to create audit log for period closure:', logError);
+    // Continue anyway - period was successfully closed
+  }
 
   res.json(updatedPeriod);
 }));
