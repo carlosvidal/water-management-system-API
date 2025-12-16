@@ -891,22 +891,53 @@ router.get('/:periodId/readings', asyncHandler(async (req, res) => {
   ]);
 
   // Flatten the structure to make it easier for frontend consumption
-  const flattenedReadings = readings.map((reading: any) => ({
-    ...reading,
-    unit: reading.meter?.unit ? {
-      ...reading.meter.unit,
-      block: reading.meter.unit.block,
-      resident: reading.meter.unit.resident,
-    } : null,
-    registeredBy: reading.user,
-    // Keep meter for backward compatibility but remove nested unit
-    meter: reading.meter ? {
-      id: reading.meter.id,
-      serialNumber: reading.meter.serialNumber,
-      installDate: reading.meter.installDate,
-      status: reading.meter.status,
-    } : null,
-  }));
+  const flattenedReadings = readings.map((reading: any) => {
+    const result: any = {
+      id: reading.id,
+      meterId: reading.meterId,
+      periodId: reading.periodId,
+      userId: reading.userId,
+      previousReading: reading.previousReading,
+      currentReading: reading.currentReading,
+      consumption: reading.consumption,
+      photo: reading.photo,
+      notes: reading.notes,
+      isValidated: reading.isValidated,
+      isAnomalous: reading.isAnomalous,
+      anomalyType: reading.anomalyType,
+      createdAt: reading.createdAt,
+      updatedAt: reading.updatedAt,
+    };
+
+    // Add flattened unit data
+    if (reading.meter?.unit) {
+      result.unit = {
+        id: reading.meter.unit.id,
+        name: reading.meter.unit.name,
+        number: reading.meter.unit.number,
+        blockId: reading.meter.unit.blockId,
+        block: reading.meter.unit.block,
+        resident: reading.meter.unit.resident,
+      };
+    }
+
+    // Add registeredBy from user
+    if (reading.user) {
+      result.registeredBy = reading.user;
+    }
+
+    // Simplified meter without nested unit
+    if (reading.meter) {
+      result.meter = {
+        id: reading.meter.id,
+        serialNumber: reading.meter.serialNumber,
+        installDate: reading.meter.installDate,
+        status: reading.meter.status,
+      };
+    }
+
+    return result;
+  });
 
   res.json({
     readings: flattenedReadings,
