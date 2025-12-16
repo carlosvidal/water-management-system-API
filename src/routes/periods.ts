@@ -890,8 +890,26 @@ router.get('/:periodId/readings', asyncHandler(async (req, res) => {
     prisma.reading.count({ where }),
   ]);
 
+  // Flatten the structure to make it easier for frontend consumption
+  const flattenedReadings = readings.map((reading: any) => ({
+    ...reading,
+    unit: reading.meter?.unit ? {
+      ...reading.meter.unit,
+      block: reading.meter.unit.block,
+      resident: reading.meter.unit.resident,
+    } : null,
+    registeredBy: reading.user,
+    // Keep meter for backward compatibility but remove nested unit
+    meter: reading.meter ? {
+      id: reading.meter.id,
+      serialNumber: reading.meter.serialNumber,
+      installDate: reading.meter.installDate,
+      status: reading.meter.status,
+    } : null,
+  }));
+
   res.json({
-    readings,
+    readings: flattenedReadings,
     pagination: {
       total,
       page,
