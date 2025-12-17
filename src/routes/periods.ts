@@ -1266,9 +1266,27 @@ router.get('/:periodId/calculations', asyncHandler(async (req, res) => {
     ],
   });
 
+  // Flatten the response to include blockName and unitName for Flutter app
+  const flattenedUnitCalculations = unitCalculations.map((calc: any) => ({
+    id: calc.id,
+    periodId: calc.periodId,
+    unitId: calc.unitId,
+    unitName: calc.unit?.name ?? 'N/A',
+    blockName: calc.unit?.block?.name ?? 'N/A',
+    residentName: calc.residentName,
+    currentReading: calc.currentReading,
+    previousReading: calc.previousReading,
+    consumption: calc.consumption,
+    individualAmount: calc.individualAmount,
+    commonAreasAmount: calc.commonAreasAmount,
+    totalAmount: calc.totalAmount,
+    createdAt: calc.createdAt,
+    updatedAt: calc.updatedAt,
+  }));
+
   res.json({
     periodCalculation,
-    unitCalculations,
+    unitCalculations: flattenedUnitCalculations,
   });
 }));
 
