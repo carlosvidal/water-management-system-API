@@ -890,8 +890,39 @@ router.get('/:periodId/readings', asyncHandler(async (req, res) => {
     prisma.reading.count({ where }),
   ]);
 
+  // Get previous period to calculate consumption
+  const previousPeriod = await prisma.period.findFirst({
+    where: {
+      condominiumId: period.condominiumId,
+      status: PeriodStatus.CLOSED,
+      id: { not: req.params.periodId },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  // Get previous readings if there's a previous period
+  let previousReadingsMap = new Map<string, number>();
+  if (previousPeriod) {
+    const previousReadings = await prisma.reading.findMany({
+      where: { periodId: previousPeriod.id },
+      select: {
+        meterId: true,
+        value: true,
+      },
+    });
+
+    // Create a map of meterId -> value for quick lookup
+    previousReadings.forEach(pr => {
+      previousReadingsMap.set(pr.meterId, pr.value);
+    });
+  }
+
   // Flatten the structure to make it easier for frontend consumption
   const flattenedReadings = readings.map((reading: any) => {
+    // Calculate previousReading and consumption from previous period
+    const previousValue = previousReadingsMap.get(reading.meterId);
+    const consumption = previousValue !== undefined ? reading.value - previousValue : null;
+
     const result: any = {
       id: reading.id,
       meterId: reading.meterId,
@@ -899,8 +930,8 @@ router.get('/:periodId/readings', asyncHandler(async (req, res) => {
       userId: reading.userId,
       value: reading.value,
       currentReading: reading.value, // Map value to currentReading for compatibility
-      previousReading: reading.previousReading,
-      consumption: reading.consumption,
+      previousReading: previousValue ?? null,
+      consumption: consumption,
       photo1: reading.photo1,
       photo2: reading.photo2,
       notes: reading.notes,
