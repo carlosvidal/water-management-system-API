@@ -917,6 +917,22 @@ router.get('/:periodId/readings', asyncHandler(async (req, res) => {
     });
   }
 
+  // Get bills for this period to show totalCost
+  const bills = await prisma.bill.findMany({
+    where: { periodId: req.params.periodId },
+    select: {
+      unitId: true,
+      totalCost: true,
+      status: true,
+    },
+  });
+
+  // Create a map of unitId -> bill for quick lookup
+  const billsMap = new Map<string, any>();
+  bills.forEach(bill => {
+    billsMap.set(bill.unitId, bill);
+  });
+
   // Flatten the structure to make it easier for frontend consumption
   const flattenedReadings = readings.map((reading: any) => {
     // Calculate previousReading and consumption from previous period
@@ -954,6 +970,13 @@ router.get('/:periodId/readings', asyncHandler(async (req, res) => {
         block: reading.meter.unit.block,
         resident: reading.meter.unit.resident,
       };
+
+      // Add bill information if available
+      const bill = billsMap.get(reading.meter.unit.id);
+      if (bill) {
+        result.totalCost = bill.totalCost;
+        result.billStatus = bill.status;
+      }
     }
 
     // Add registeredBy from user
